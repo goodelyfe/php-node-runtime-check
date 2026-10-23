@@ -1,0 +1,36 @@
+<!--
+  Agent-side config for the php2shell rules. Merge these blocks into
+  /var/ossec/etc/ossec.conf on each host that runs PHP apps (or push them via
+  centralized agent.conf), then restart the agent.
+
+  Replace every /path/to/... with your own bind-mount paths.
+-->
+<ossec_config>
+
+  <!-- FIM: realtime, PHP files only, on app code and upload/data directories.
+       Watch where an attacker could write: web roots, plugin/app dirs, upload dirs. -->
+  <syscheck>
+    <directories realtime="yes" restrict="\.php$|\.phtml$|\.phar$">/path/to/app1/www</directories>
+    <directories realtime="yes" restrict="\.php$|\.phtml$|\.phar$">/path/to/app2/html</directories>
+    <directories realtime="yes" restrict="\.php$|\.phtml$|\.phar$">/path/to/app2/data</directories>
+  </syscheck>
+
+  <!-- PHP / web server logs written to bind mounts -->
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/path/to/app1/log/php/*.log</location>
+  </localfile>
+
+  <!-- Containers that log to stdout (Docker json-file driver) -->
+  <localfile>
+    <log_format>json</log_format>
+    <location>/var/lib/docker/containers/*/*-json.log</location>
+  </localfile>
+
+  <!-- auditd events, needed for rule 100503 -->
+  <localfile>
+    <log_format>audit</log_format>
+    <location>/var/log/audit/audit.log</location>
+  </localfile>
+
+</ossec_config>

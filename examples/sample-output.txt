@@ -1,0 +1,15 @@
+$ sudo ./runtime-check.sh
+KIND    LOCATION                                         RT    VERSION   STATUS
+host    docker-host-01                                   node  v22.23.4  ok
+docker  wiki                                             php   8.3.19    VULNERABLE (<8.3.36)
+docker  cloud                                            php   8.4.27    ok
+docker  finance                                          php   8.5.7     VULNERABLE (<8.5.12)
+docker  blog                                             node  v20.19.0  EOL (no fix on this branch)
+docker  photos                                           node  v24.22.1  ok
+lxc     110                                              php   8.2.33    VULNERABLE (<8.2.35)
+pod     apps/pastebin-7d9f8c6b5-x2k4q                    php   8.5.9     VULNERABLE (<8.5.12)
+pod     apps/dashboard-5c8b9d7f4-m8n2p                   node  v26.12.1  ok
+
+FAIL: 5 runtime(s) need attention
+$ echo $?
+1

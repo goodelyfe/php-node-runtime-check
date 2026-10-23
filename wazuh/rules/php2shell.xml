@@ -1,0 +1,51 @@
+<!--
+  PHP2Shell (CVE-2026-109618 / CVE-2026-109619) detection rules for Wazuh.
+  Install: copy into /var/ossec/etc/rules/ on the manager (or merge into
+  local_rules.xml), then restart the manager.
+
+  Rule IDs 100500-100503 sit in the custom range. Renumber if they collide
+  with your own rules.
+
+  Rules 100500 and 100503 need the agent config in ../agent-snippets.xml
+  (FIM on app directories) and ../../auditd/webshell.rules respectively.
+-->
+<group name="php2shell,web,">
+
+  <!-- New or changed PHP file in a watched app directory: classic webshell drop.
+       Expect noise when an app legitimately updates itself (plugin/app installs). -->
+  <rule id="100500" level="12">
+    <if_sid>550,554</if_sid>
+    <field name="file">\.php$|\.phtml$|\.phar$</field>
+    <description>PHP file created/modified in watched app directory: $(file)</description>
+    <mitre>
+      <id>T1505.003</id>
+    </mitre>
+  </rule>
+
+  <!-- Exploit side effects: memory exhaustion and crashed PHP workers.
+       Single events happen legitimately, so this stays low-level. -->
+  <rule id="100501" level="7">
+    <match>Allowed memory size of|exited on signal 11|SIGSEGV|segfault</match>
+    <description>PHP memory exhaustion or worker crash</description>
+  </rule>
+
+  <!-- A burst of the above is what failed exploit attempts tend to look like. -->
+  <rule id="100502" level="12" frequency="5" timeframe="120">
+    <if_matched_sid>100501</if_matched_sid>
+    <description>Burst of PHP OOM/crash events: possible PHP2Shell exploitation attempt</description>
+    <mitre>
+      <id>T1190</id>
+    </mitre>
+  </rule>
+
+  <!-- Web server user executing commands (requires the auditd rule). -->
+  <rule id="100503" level="12">
+    <if_sid>80700</if_sid>
+    <field name="audit.key">webshell_exec</field>
+    <description>Command executed by web server user: $(audit.exe)</description>
+    <mitre>
+      <id>T1059.004</id>
+    </mitre>
+  </rule>
+
+</group>

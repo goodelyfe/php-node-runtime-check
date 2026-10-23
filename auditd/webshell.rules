@@ -1,0 +1,14 @@
+# Log every command executed by the web server user (feeds Wazuh rule 100503).
+#
+# Install:  sudo cp webshell.rules /etc/audit/rules.d/ && sudo augenrules --load
+#
+# uid 33 = www-data on Debian/Ubuntu, and in the official php:*-apache and
+# php:*-fpm images. Container processes show up with their host-side
+# uid, so this catches containers too, unless they use user namespaces.
+#
+# linuxserver.io images run as your PUID (often 1000, which is probably you).
+# To cover those without logging your own shell, give the app stacks a
+# dedicated PUID and add a line for it.
+
+-a always,exit -F arch=b64 -F euid=33 -S execve -k webshell_exec
+# -a always,exit -F arch=b64 -F euid=<APP_PUID> -S execve -k webshell_exec
