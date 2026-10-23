@@ -75,7 +75,7 @@ fi
 # Docker
 if command -v docker >/dev/null 2>&1; then
   docker ps --format '{{.Names}}' 2>/dev/null | while read -r c; do
-    { docker exec "$c" sh -c "$PROBE" 2>/dev/null || bare_node docker exec "$c"; } | report docker "$c"
+    { docker exec "$c" sh -c "$PROBE" 2>/dev/null </dev/null || bare_node docker exec "$c" </dev/null; } | report docker "$c"
   done
 fi
 
@@ -83,7 +83,7 @@ fi
 # the script run inside that LXC)
 if command -v pct >/dev/null 2>&1; then
   pct list 2>/dev/null | awk 'NR>1 && $2=="running" {print $1}' | while read -r ct; do
-    pct exec "$ct" -- sh -c "$PROBE" 2>/dev/null | report lxc "$ct"
+    pct exec "$ct" -- sh -c "$PROBE" 2>/dev/null </dev/null | report lxc "$ct"
   done
 fi
 
@@ -92,8 +92,8 @@ if command -v kubectl >/dev/null 2>&1 && kubectl get ns >/dev/null 2>&1; then
   kubectl get pods -A --field-selector=status.phase=Running \
     -o jsonpath='{range .items[*]}{.metadata.namespace} {.metadata.name}{"\n"}{end}' |
   while read -r ns p; do
-    { timeout 15 kubectl exec -n "$ns" "$p" -- sh -c "$PROBE" 2>/dev/null \
-        || bare_node timeout 15 kubectl exec -n "$ns" "$p" --; } | report pod "$ns/$p"
+    { timeout 15 kubectl exec -n "$ns" "$p" -- sh -c "$PROBE" 2>/dev/null </dev/null \
+        || bare_node timeout 15 kubectl exec -n "$ns" "$p" -- </dev/null; } | report pod "$ns/$p"
   done
 fi
 
