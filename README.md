@@ -13,6 +13,7 @@ PHP and Node live *inside* container images, so `apt upgrade` on the host fixes 
 | Path | What it does |
 |---|---|
 | `runtime-check.sh` | Inventory + verdict for PHP and Node on host, Docker, LXCs, k8s pods. Exit 1 on findings. |
+| `patch-runtimes.sh` | Fixes what the check finds: upgrades package-installed runtimes on LXCs and hosts (snapshot first, restart services, re-check), and lists which deployments and compose stacks need a new image. Dry run by default. |
 | `wazuh/rules/php2shell.xml` | Manager rules: webshell file drops, OOM/crash bursts, web-user command execution |
 | `wazuh/agent-snippets.xml` | Agent config for those rules (FIM, logs, auditd); replace the placeholder paths |
 | `auditd/webshell.rules` | auditd rule that logs commands run by the web server user |
@@ -37,6 +38,25 @@ Status meanings:
 
 Note that Ubuntu and RHEL backport fixes into old version numbers (Ubuntu 24.04's PHP still says `8.3.6`), so distro PHP on a host may show VULNERABLE while actually patched. The script prints how to confirm via the package changelog.
 
+## Patching what it finds
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/goodelyfe/php-node-runtime-check/main/patch-runtimes.sh
+sudo bash patch-runtimes.sh                # dry run: every running LXC on a Proxmox host
+sudo bash patch-runtimes.sh --apply 133    # snapshot, upgrade, restart, re-check one LXC
+sudo bash patch-runtimes.sh --apply        # all of them
+sudo bash patch-runtimes.sh --host         # this machine instead of LXCs
+sudo bash patch-runtimes.sh --k8s          # which deployments need a new image tag
+sudo bash patch-runtimes.sh --docker       # which compose stacks need a pull
+```
+
+- Only runtimes installed from an apt or apk package (NodeSource, Debian/Ubuntu, sury.org, Alpine) are upgraded, and only those packages, not a full system upgrade.
+- Anything installed another way (nvm, a tarball in `/opt` or `/usr/local`, a binary bundled with an app) is listed as **MANUAL** with its path.
+- On LXCs it takes a `pct snapshot` first and skips the container if that fails (`--no-snapshot` to override). It prints the rollback command.
+- After upgrading it restarts the systemd services running `node`, `php-fpm` or Apache with mod_php (`--no-restart` to skip), then re-checks.
+- Pods and Docker containers are report-only: you fix them by pulling a newer image, and a GitOps tool would revert a live edit anyway.
+- If the re-check still says VULNERABLE, either the package repo hasn't published the fix yet or the distro backports it without changing the version. Check the changelog.
+
 ## Updating for the next CVE
 
 Everything is driven by one line:
@@ -45,7 +65,7 @@ Everything is driven by one line:
 FLOORS="php:8.2.35 php:8.3.36 php:8.4.27 php:8.5.12 node:22.23.4 node:24.22.1 node:26.12.1"
 ```
 
-One `runtime:version` entry per supported branch. Edit it, or override at run time:
+One `runtime:version` entry per supported branch, in both `runtime-check.sh` and `patch-runtimes.sh`. Edit it, or override at run time:
 
 ```bash
 FLOORS="php:8.4.30 php:8.5.15 node:24.23.0" sudo -E bash runtime-check.sh
