@@ -41,9 +41,9 @@ for a in "$@"; do
     --no-snapshot) SNAP=0 ;;
     --no-restart) RESTART=0 ;;
     --restart-only) RONLY=1 ;;
-    --host) MODE=host ;;
-    --k8s) MODE=k8s ;;
-    --docker) MODE=docker ;;
+    --host) [ $MODE = lxc ] || { echo "pick one of --host, --k8s, --docker per run" >&2; exit 2; }; MODE=host ;;
+    --k8s) [ $MODE = lxc ] || { echo "pick one of --host, --k8s, --docker per run" >&2; exit 2; }; MODE=k8s ;;
+    --docker) [ $MODE = lxc ] || { echo "pick one of --host, --k8s, --docker per run" >&2; exit 2; }; MODE=docker ;;
     -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
     [0-9]*) TARGETS+=("$a") ;;
     *) echo "unknown option: $a" >&2; exit 2 ;;
