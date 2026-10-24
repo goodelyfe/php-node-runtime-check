@@ -107,17 +107,17 @@ exit 0'
 # Upgrade. Expects PM, DO_NODE, DO_PHP set in front of it.
 UPGRADE='set -e
 if [ "$PM" = apt ]; then
-  export DEBIAN_FRONTEND=noninteractive
+  export DEBIAN_FRONTEND=noninteractive APT_LISTCHANGES_FRONTEND=none NEEDRESTART_MODE=l
   pk=
   [ "$DO_NODE" = 1 ] && pk="$pk nodejs"
   [ "$DO_PHP" = 1 ] && pk="$pk $(dpkg-query -W -f="\${db:Status-Abbrev} \${Package}\n" "php*" 2>/dev/null | awk "/^ii/{print \$2}" | tr "\n" " ")"
-  apt-get update -qq -o DPkg::Lock::Timeout=180 || true
+  apt-get update -o DPkg::Lock::Timeout=180 2>&1 | grep -E "^(W|E|Err):" | sed "s/^/APTWARN /" || true
   apt-get install -y -qq --only-upgrade -o DPkg::Lock::Timeout=180 -o Dpkg::Options::=--force-confold $pk
 elif [ "$PM" = apk ]; then
   pk=
   [ "$DO_NODE" = 1 ] && pk="$pk nodejs"
   [ "$DO_PHP" = 1 ] && pk="$pk $(apk info 2>/dev/null | grep -E "^php[0-9]*(-|$)" | tr "\n" " ")"
-  apk update -q
+  apk update -q 2>&1 | sed "s/^/APTWARN /" || true
   apk upgrade -q $pk
 fi'
 
@@ -228,7 +228,11 @@ patch_target() { # $1 = host | <ctid>
 
   echo "  upgrading..."
   if ! run_in "$t" "PM=$pm DO_NODE=$do_node DO_PHP=$do_php; $UPGRADE" >/tmp/patch-runtimes.$$.log 2>&1; then
-    echo "  UPGRADE FAILED. Last lines:"; tail -5 /tmp/patch-runtimes.$$.log | sed 's/^/    /'
+    echo "  UPGRADE FAILED. Last lines:"; grep -v '^APTWARN ' /tmp/patch-runtimes.$$.log | tail -5 | sed 's/^/    /'
+  fi
+  if grep -q '^APTWARN ' /tmp/patch-runtimes.$$.log; then
+    echo "  package index problems (upgrades below may come from stale lists):"
+    grep '^APTWARN ' /tmp/patch-runtimes.$$.log | sed 's/^APTWARN /    /' | cut -c1-200 | sort -u | head -6
   fi
   rm -f /tmp/patch-runtimes.$$.log
   [ $RESTART = 1 ] && run_in "$t" "DRY=0; $RESTARTS"
