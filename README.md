@@ -53,7 +53,9 @@ sudo bash patch-runtimes.sh --docker       # which compose stacks need a pull
 - Only runtimes installed from an apt or apk package (NodeSource, Debian/Ubuntu, sury.org, Alpine) are upgraded, and only those packages, not a full system upgrade.
 - Anything installed another way (nvm, a tarball in `/opt` or `/usr/local`, a binary bundled with an app) is listed as **MANUAL** with its path.
 - On LXCs it takes a `pct snapshot` first and skips the container if that fails (`--no-snapshot` to override). It prints the rollback command.
-- After upgrading it restarts the systemd services running `node`, `php-fpm` or Apache with mod_php (`--no-restart` to skip), then re-checks.
+- After upgrading it restarts only the systemd services still running the old binary (a process started before the upgrade shows its `node`/`php-fpm` binary, or Apache's `libphp`, as deleted), then re-checks. `--no-restart` skips this. Processes outside a system service (a user session, tmux, `nohup`) are listed for you to restart.
+- `--restart-only` does just the restart step, for runtimes upgraded some other way. Dry run unless `--apply`.
+- apt waits up to 3 minutes for another apt or unattended-upgrades run to finish instead of failing on the lock.
 - Pods and Docker containers are report-only: you fix them by pulling a newer image, and a GitOps tool would revert a live edit anyway.
 - If the re-check still says VULNERABLE, either the package repo hasn't published the fix yet or the distro backports it without changing the version. Check the changelog.
 

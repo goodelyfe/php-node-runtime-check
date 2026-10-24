@@ -18,6 +18,8 @@
 #   --apply         actually upgrade (default is a dry run)
 #   --no-snapshot   don't take a pct snapshot first (LXCs only; default takes one)
 #   --no-restart    upgrade packages but don't restart the services using them
+#   --restart-only  skip upgrades; restart services still running an old (deleted)
+#                   node/php binary, e.g. after an upgrade done some other way
 #
 # What it can fix automatically: runtimes installed from an apt or apk package
 # (NodeSource, Debian/Ubuntu PHP, sury.org, Alpine). Anything else (nvm, a
@@ -31,17 +33,18 @@ set -u
 # Keep in sync with runtime-check.sh.
 FLOORS="${FLOORS:-php:8.2.35 php:8.3.36 php:8.4.27 php:8.5.12 node:22.23.4 node:24.22.1 node:26.12.1}"
 
-APPLY=0 SNAP=1 RESTART=1 MODE=lxc
+APPLY=0 SNAP=1 RESTART=1 MODE=lxc RONLY=0
 TARGETS=()
 for a in "$@"; do
   case $a in
     --apply) APPLY=1 ;;
     --no-snapshot) SNAP=0 ;;
     --no-restart) RESTART=0 ;;
+    --restart-only) RONLY=1 ;;
     --host) MODE=host ;;
     --k8s) MODE=k8s ;;
     --docker) MODE=docker ;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
     [0-9]*) TARGETS+=("$a") ;;
     *) echo "unknown option: $a" >&2; exit 2 ;;
   esac
@@ -108,8 +111,8 @@ if [ "$PM" = apt ]; then
   pk=
   [ "$DO_NODE" = 1 ] && pk="$pk nodejs"
   [ "$DO_PHP" = 1 ] && pk="$pk $(dpkg-query -W -f="\${db:Status-Abbrev} \${Package}\n" "php*" 2>/dev/null | awk "/^ii/{print \$2}" | tr "\n" " ")"
-  apt-get update -qq
-  apt-get install -y -qq --only-upgrade -o Dpkg::Options::=--force-confold $pk
+  apt-get update -qq -o DPkg::Lock::Timeout=180 || true
+  apt-get install -y -qq --only-upgrade -o DPkg::Lock::Timeout=180 -o Dpkg::Options::=--force-confold $pk
 elif [ "$PM" = apk ]; then
   pk=
   [ "$DO_NODE" = 1 ] && pk="$pk nodejs"
@@ -118,26 +121,40 @@ elif [ "$PM" = apk ]; then
   apk upgrade -q $pk
 fi'
 
-# Restart whatever is running the old binary.
+# Restart whatever is still running the old binary. After a package upgrade,
+# a process that started before it shows "(deleted)" on its exe (node, php-fpm)
+# or on a mapped libphp (Apache mod_php). Only those get restarted.
+# Expects DRY=0|1 set in front of it.
 RESTARTS='if ! command -v systemctl >/dev/null 2>&1 || [ ! -d /run/systemd/system ]; then
   echo "  no systemd here: restart the PHP/Node services yourself, or reboot the container"
   exit 0
 fi
 units=
-for p in $(pgrep -x node; pgrep -f "php-fpm: master"); do
+for d in /proc/[0-9]*; do
+  p=${d#/proc/}
+  e=$(readlink "$d/exe" 2>/dev/null) || continue
+  hit=
+  case $e in
+    *"/node (deleted)"|*"/nodejs (deleted)"|*"/php-fpm"*" (deleted)") hit=1 ;;
+  esac
+  [ -z "$hit" ] && grep -q "libphp.* (deleted)" "$d/maps" 2>/dev/null && hit=1
+  [ -n "$hit" ] || continue
   u=$(ps -o unit= -p "$p" 2>/dev/null | tr -d " ")
   case $u in
+    user@*.service|*.scope|""|-)
+      echo "  pid $p ($(cat "$d/comm" 2>/dev/null)) is on the old binary outside a system service ($u): restart it yourself" ;;
     *.service) units="$units $u" ;;
-    *) echo "  pid $p ($(ps -o comm= -p "$p")) is not under a systemd service: restart it yourself" ;;
   esac
 done
-if systemctl is-active -q apache2 2>/dev/null && ls /etc/apache2/mods-enabled/php*.load >/dev/null 2>&1; then
-  units="$units apache2.service"
+units=$(echo $units | tr " " "\n" | sort -u)
+if [ -z "$units" ]; then
+  echo "  no system services running the old binary"
+  exit 0
 fi
-for u in $(echo $units | tr " " "\n" | sort -u); do
-  systemctl restart "$u" && echo "  restarted $u" || echo "  FAILED to restart $u"
+for u in $units; do
+  if [ "$DRY" = 1 ]; then echo "  would restart $u"
+  else systemctl restart "$u" && echo "  restarted $u" || echo "  FAILED to restart $u"; fi
 done
-[ -n "$units" ] || echo "  nothing running the runtime as a service"
 exit 0'
 
 # ---------------------------------------------------------------- helpers
@@ -214,7 +231,7 @@ patch_target() { # $1 = host | <ctid>
     echo "  UPGRADE FAILED. Last lines:"; tail -5 /tmp/patch-runtimes.$$.log | sed 's/^/    /'
   fi
   rm -f /tmp/patch-runtimes.$$.log
-  [ $RESTART = 1 ] && run_in "$t" "$RESTARTS"
+  [ $RESTART = 1 ] && run_in "$t" "DRY=0; $RESTARTS"
 
   echo "  after:"
   probe=$(run_in "$t" "$PROBE" 2>/dev/null)
@@ -236,10 +253,15 @@ lxc)
     mapfile -t TARGETS < <(pct list 2>/dev/null | awk 'NR>1 && $2=="running" {print $1}')
   fi
   [ $APPLY = 1 ] && echo "APPLY mode: snapshot=$SNAP restart=$RESTART" || echo "DRY RUN (nothing will change)"
+  if [ $RONLY = 1 ]; then
+    for ct in "${TARGETS[@]}"; do echo "== lxc $ct"; run_in "$ct" "DRY=$((1-APPLY)); $RESTARTS"; done
+    exit 0
+  fi
   for ct in "${TARGETS[@]}"; do patch_target "$ct"; done
   ;;
 host)
   [ $APPLY = 1 ] && echo "APPLY mode on this host: restart=$RESTART" || echo "DRY RUN (nothing will change)"
+  if [ $RONLY = 1 ]; then echo "== host $(hostname)"; run_in host "DRY=$((1-APPLY)); $RESTARTS"; exit 0; fi
   patch_target host
   ;;
 k8s)
